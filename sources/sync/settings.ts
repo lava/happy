@@ -52,7 +52,7 @@ export const settingsDefaults: Settings = {
     expandTodos: true,
     showLineNumbers: true,
     showLineNumbersInToolViews: false,
-    analyticsOptOut: false,
+    analyticsOptOut: true,
     experiments: false,
     alwaysShowContextSize: false,
     avatarStyle: 'brutalist',
