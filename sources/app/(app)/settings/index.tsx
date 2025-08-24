@@ -415,41 +415,6 @@ export default React.memo(function SettingsScreen() {
                     onPress={handleReportIssue}
                 />
                 <Item
-                    title={t('settings.privacyPolicy')}
-                    icon={<Ionicons name="shield-checkmark-outline" size={29} color="#007AFF" />}
-                    onPress={async () => {
-                        const url = 'https://happy.engineering/privacy/';
-                        const supported = await Linking.canOpenURL(url);
-                        if (supported) {
-                            await Linking.openURL(url);
-                        }
-                    }}
-                />
-                <Item
-                    title={t('settings.termsOfService')}
-                    icon={<Ionicons name="document-text-outline" size={29} color="#007AFF" />}
-                    onPress={async () => {
-                        const url = 'https://github.com/slopus/happy/blob/main/TERMS.md';
-                        const supported = await Linking.canOpenURL(url);
-                        if (supported) {
-                            await Linking.openURL(url);
-                        }
-                    }}
-                />
-                {Platform.OS === 'ios' && (
-                    <Item
-                        title={t('settings.eula')}
-                        icon={<Ionicons name="document-text-outline" size={29} color="#007AFF" />}
-                        onPress={async () => {
-                            const url = 'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/';
-                            const supported = await Linking.canOpenURL(url);
-                            if (supported) {
-                                await Linking.openURL(url);
-                            }
-                        }}
-                    />
-                )}
-                <Item
                     title={t('common.version')}
                     detail={appVersion}
                     icon={<Ionicons name="information-circle-outline" size={29} color={theme.colors.textSecondary} />}
