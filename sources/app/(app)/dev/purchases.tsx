@@ -26,58 +26,11 @@ export default function PurchasesDevScreen() {
     }, [purchases.entitlements]);
 
     const handlePurchase = async () => {
-        if (!productId.trim()) {
-            Modal.alert('Error', 'Please enter a product ID');
-            return;
-        }
-
-        setIsPurchasing(true);
-        try {
-            const result = await sync.purchaseProduct(productId.trim());
-            if (result.success) {
-                Modal.alert('Success', 'Purchase completed successfully');
-                setProductId('');
-            } else {
-                Modal.alert('Purchase Failed', result.error || 'Unknown error');
-            }
-        } catch (e) {
-            console.error('Error purchasing product', e);
-        } finally {
-            setIsPurchasing(false);
-        }
+        Modal.alert('Disabled', 'Purchase functionality has been disabled for self-hosted deployment');
     };
 
     const fetchOfferings = async () => {
-        setLoadingOfferings(true);
-        try {
-            const result = await sync.getOfferings();
-            if (result.success) {
-                setOfferings(result.offerings);
-
-                // Log full offerings data
-                console.log('=== RevenueCat Offerings ===');
-                console.log('Current offering:', result.offerings.current?.identifier || 'None');
-
-                if (result.offerings.current) {
-                    console.log('\nCurrent Offering Packages:');
-                    Object.entries(result.offerings.current.availablePackages || {}).forEach(([key, pkg]: [string, any]) => {
-                        console.log(`  - ${key}: ${pkg.product.identifier} (${pkg.product.priceString})`);
-                    });
-                }
-
-                console.log('\nAll Offerings:');
-                Object.entries(result.offerings.all || {}).forEach(([id, offering]: [string, any]) => {
-                    console.log(`  - ${id} (${Object.keys(offering.availablePackages || {}).length} packages)`);
-                });
-
-                console.log('\nFull JSON:', JSON.stringify(result.offerings, null, 2));
-                console.log('===========================');
-            } else {
-                Modal.alert('Error', result.error || 'Failed to fetch offerings');
-            }
-        } finally {
-            setLoadingOfferings(false);
-        }
+        Modal.alert('Disabled', 'Offerings functionality has been disabled for self-hosted deployment');
     };
 
     return (
@@ -171,9 +124,9 @@ export default function PurchasesDevScreen() {
                 {/* Actions */}
                 <ItemGroup title="Actions">
                     <Item
-                        title="Refresh Purchases"
-                        icon={<Ionicons name="refresh-outline" size={29} color="#007AFF" />}
-                        onPress={() => sync.refreshPurchases()}
+                        title="Refresh Purchases (Disabled)"
+                        icon={<Ionicons name="refresh-outline" size={29} color="#8E8E93" />}
+                        onPress={() => Modal.alert('Disabled', 'Purchase refresh has been disabled for self-hosted deployment')}
                     />
                     <Item
                         title={loadingOfferings ? "Loading Offerings..." : "Log Offerings"}
@@ -212,13 +165,8 @@ export default function PurchasesDevScreen() {
                 {/* Debug Info */}
                 <ItemGroup title="Debug Info">
                     <Item
-                        title="RevenueCat Status"
-                        detail={sync.revenueCatInitialized ? "Initialized" : "Not Initialized"}
-                        showChevron={false}
-                    />
-                    <Item
-                        title="User ID"
-                        detail={sync.serverID || "Not available"}
+                        title="Purchase System Status"
+                        detail="Disabled (Self-hosted)"
                         showChevron={false}
                     />
                 </ItemGroup>
