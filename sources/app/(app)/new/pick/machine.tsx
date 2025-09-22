@@ -119,6 +119,7 @@ export default function MachinePickerScreen() {
                     {machines.map((machine) => {
                         const displayName = machine.metadata?.displayName || machine.metadata?.host || machine.id;
                         const hostName = machine.metadata?.host || machine.id;
+                        const isActive = machine.active;
                         const offline = !isMachineOnline(machine);
                         const isSelected = params.selectedId === machine.id;
 
@@ -131,22 +132,23 @@ export default function MachinePickerScreen() {
                                     <Ionicons
                                         name="desktop-outline"
                                         size={24}
-                                        color={offline ? theme.colors.textSecondary : theme.colors.text}
+                                        color={!isActive ? theme.colors.textSecondary : (offline ? theme.colors.textSecondary : theme.colors.text)}
                                     />
                                 }
-                                detail={offline ? 'offline' : 'online'}
+                                detail={!isActive ? 'offline' : (offline ? 'offline' : 'online')}
                                 detailStyle={{
-                                    color: offline ? theme.colors.status.disconnected : theme.colors.status.connected
+                                    color: !isActive ? theme.colors.textSecondary : (offline ? theme.colors.status.disconnected : theme.colors.status.connected)
                                 }}
                                 titleStyle={{
-                                    color: offline ? theme.colors.textSecondary : theme.colors.text
+                                    color: !isActive ? theme.colors.textSecondary : (offline ? theme.colors.textSecondary : theme.colors.text)
                                 }}
                                 subtitleStyle={{
                                     color: theme.colors.textSecondary
                                 }}
                                 selected={isSelected}
-                                onPress={() => handleSelectMachine(machine.id)}
+                                onPress={isActive ? () => handleSelectMachine(machine.id) : undefined}
                                 showChevron={false}
+                                disabled={!isActive}
                             />
                         );
                     })}
