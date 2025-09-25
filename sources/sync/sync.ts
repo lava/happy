@@ -125,6 +125,7 @@ class Sync {
     }
 
     async #init() {
+        console.log('[Sync.#init] Starting sync initialization...');
 
         // Subscribe to updates
         this.subscribeToUpdates();
@@ -140,7 +141,7 @@ class Sync {
         }
 
         // Invalidate sync
-        log.log('🔄 #init: Invalidating all syncs');
+        console.log('[Sync.#init] Invalidating all syncs...');
         this.sessionsSync.invalidate();
         this.settingsSync.invalidate();
         this.profileSync.invalidate();
@@ -149,16 +150,23 @@ class Sync {
         this.pushTokenSync.invalidate();
         this.nativeUpdateSync.invalidate();
         this.artifactsSync.invalidate();
-        log.log('🔄 #init: All syncs invalidated, including artifacts');
+        console.log('[Sync.#init] All syncs invalidated');
 
         // Wait for both sessions and machines to load, then mark as ready
+        console.log('[Sync.#init] Waiting for sessions and machines to load...');
         Promise.all([
             this.sessionsSync.awaitQueue(),
             this.machinesSync.awaitQueue()
         ]).then(() => {
+            console.log('[Sync.#init] Sessions and machines loaded successfully, marking storage as ready');
             storage.getState().applyReady();
+
+            // Log current state
+            const state = storage.getState();
+            console.log('[Sync.#init] Storage ready. Machine count:', Object.keys(state.machines).length);
+            console.log('[Sync.#init] Machine IDs:', Object.keys(state.machines));
         }).catch((error) => {
-            console.error('Failed to load initial data:', error);
+            console.error('[Sync.#init] Failed to load initial data:', error);
         });
     }
 
@@ -706,10 +714,15 @@ class Sync {
     }
 
     private fetchMachines = async () => {
-        if (!this.credentials) return;
+        if (!this.credentials) {
+            console.log('[fetchMachines] No credentials, skipping');
+            return;
+        }
 
-        console.log('📊 Sync: Fetching machines...');
+        console.log('[fetchMachines] Starting machine fetch...');
         const API_ENDPOINT = getServerUrl();
+        console.log(`[fetchMachines] Fetching from: ${API_ENDPOINT}/v1/machines`);
+
         const response = await fetch(`${API_ENDPOINT}/v1/machines`, {
             headers: {
                 'Authorization': `Bearer ${this.credentials.token}`,
@@ -718,12 +731,15 @@ class Sync {
         });
 
         if (!response.ok) {
-            console.error(`Failed to fetch machines: ${response.status}`);
+            console.error(`[fetchMachines] Failed to fetch machines: ${response.status}`, {
+                status: response.status,
+                statusText: response.statusText
+            });
             return;
         }
 
         const data = await response.json();
-        console.log(`📊 Sync: Fetched ${Array.isArray(data) ? data.length : 0} machines from server`);
+        console.log(`[fetchMachines] Fetched ${Array.isArray(data) ? data.length : 0} machines from server`);
         const machines = data as Array<{
             id: string;
             metadata: string;
@@ -739,32 +755,50 @@ class Sync {
         }>;
 
         // First, collect and decrypt encryption keys for all machines
+        console.log('[fetchMachines] Processing encryption keys for machines...');
         const machineKeysMap = new Map<string, Uint8Array | null>();
+
         for (const machine of machines) {
+            console.log(`[fetchMachines] Processing machine ${machine.id}`, {
+                hasDataEncryptionKey: !!machine.dataEncryptionKey,
+                active: machine.active,
+                hasMetadata: !!machine.metadata
+            });
+
             if (machine.dataEncryptionKey) {
+                console.log(`[fetchMachines] Decrypting data encryption key for machine ${machine.id}`);
                 const decryptedKey = await this.encryption.decryptEncryptionKey(machine.dataEncryptionKey);
                 if (!decryptedKey) {
-                    console.error(`Failed to decrypt data encryption key for machine ${machine.id}`);
+                    console.error(`[fetchMachines] Failed to decrypt data encryption key for machine ${machine.id}`);
                     continue;
                 }
                 machineKeysMap.set(machine.id, decryptedKey);
                 this.machineDataKeys.set(machine.id, decryptedKey);
+                console.log(`[fetchMachines] Successfully decrypted key for machine ${machine.id}`);
             } else {
+                console.log(`[fetchMachines] No data encryption key for machine ${machine.id}, using null`);
                 machineKeysMap.set(machine.id, null);
             }
         }
 
+        console.log(`[fetchMachines] Collected keys for ${machineKeysMap.size} machines`);
+
         // Initialize machine encryptions
+        console.log('[fetchMachines] Initializing machine encryptions...');
         await this.encryption.initializeMachines(machineKeysMap);
+        console.log('[fetchMachines] Machine encryptions initialized');
 
         // Process all machines first, then update state once
         const decryptedMachines: Machine[] = [];
 
         for (const machine of machines) {
+            console.log(`[fetchMachines] Processing machine data for ${machine.id}`);
+
             // Get machine-specific encryption (might exist from previous initialization)
             const machineEncryption = this.encryption.getMachineEncryption(machine.id);
             if (!machineEncryption) {
-                console.error(`Machine encryption not found for ${machine.id} - this should never happen`);
+                console.error(`[fetchMachines] CRITICAL: Machine encryption not found for ${machine.id} - this should never happen`);
+                console.error(`[fetchMachines] Available machines in encryption:`, Array.from(machineKeysMap.keys()));
                 continue;
             }
 
@@ -810,8 +844,10 @@ class Sync {
         }
 
         // Replace entire machine state with fetched machines
+        console.log(`[fetchMachines] Applying ${decryptedMachines.length} machines to storage`);
         storage.getState().applyMachines(decryptedMachines, true);
-        log.log(`🖥️ fetchMachines completed - processed ${decryptedMachines.length} machines`);
+        console.log(`[fetchMachines] ✅ Completed - processed ${decryptedMachines.length} machines`);
+        console.log(`[fetchMachines] Machine IDs in storage:`, decryptedMachines.map(m => m.id));
     }
 
     private syncSettings = async () => {
@@ -1563,30 +1599,41 @@ export async function syncRestore(credentials: AuthCredentials) {
 }
 
 async function syncInit(credentials: AuthCredentials, restore: boolean) {
+    console.log('[syncInit] Starting sync initialization', {
+        restore,
+        hasToken: !!credentials.token,
+        hasSecret: !!credentials.secret
+    });
 
     // Initialize sync engine
     const secretKey = decodeBase64(credentials.secret, 'base64url');
     if (secretKey.length !== 32) {
         throw new Error(`Invalid secret key length: ${secretKey.length}, expected 32`);
     }
+    console.log('[syncInit] Creating encryption...');
     const encryption = await Encryption.create(secretKey);
+    console.log('[syncInit] Encryption created successfully');
 
     // Initialize tracking
     initializeTracking(encryption.anonID);
 
     // Initialize socket connection
     const API_ENDPOINT = getServerUrl();
+    console.log('[syncInit] Initializing socket connection to:', API_ENDPOINT);
     apiSocket.initialize({ endpoint: API_ENDPOINT, token: credentials.token }, encryption);
 
     // Wire socket status to storage
     apiSocket.onStatusChange((status) => {
+        console.log('[syncInit] Socket status changed to:', status);
         storage.getState().setSocketStatus(status);
     });
 
     // Initialize sessions engine
+    console.log('[syncInit] Initializing sync engine (restore mode:', restore, ')');
     if (restore) {
         await sync.restore(credentials, encryption);
     } else {
         await sync.create(credentials, encryption);
     }
+    console.log('[syncInit] Sync initialization completed');
 }

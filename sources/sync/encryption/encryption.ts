@@ -100,11 +100,19 @@ export class Encryption {
      * This should be called once when machines are loaded
      */
     async initializeMachines(machines: Map<string, Uint8Array | null>): Promise<void> {
+        console.log(`[Encryption.initializeMachines] Initializing ${machines.size} machines`);
+
         for (const [machineId, dataKey] of machines) {
             // Skip if already initialized
             if (this.machineEncryptions.has(machineId)) {
+                console.log(`[Encryption.initializeMachines] Machine ${machineId} already initialized`);
                 continue;
             }
+
+            console.log(`[Encryption.initializeMachines] Initializing machine ${machineId}`, {
+                hasDataKey: !!dataKey,
+                dataKeyLength: dataKey ? dataKey.length : 0
+            });
 
             // Create appropriate encryptor based on data key
             const encryptor = await this.openEncryption(dataKey);
@@ -116,7 +124,10 @@ export class Encryption {
                 this.cache
             );
             this.machineEncryptions.set(machineId, machineEnc);
+            console.log(`[Encryption.initializeMachines] Machine ${machineId} encryption initialized successfully`);
         }
+
+        console.log(`[Encryption.initializeMachines] Completed. Total machines with encryption: ${this.machineEncryptions.size}`);
     }
 
     /**
@@ -124,7 +135,19 @@ export class Encryption {
      * Returns null if not initialized (should never happen in normal flow)
      */
     getMachineEncryption(machineId: string): MachineEncryption | null {
-        return this.machineEncryptions.get(machineId) || null;
+        const encryption = this.machineEncryptions.get(machineId) || null;
+
+        if (!encryption) {
+            console.error(`[Encryption.getMachineEncryption] Machine encryption not found`, {
+                machineId,
+                availableMachines: Array.from(this.machineEncryptions.keys()),
+                totalMachines: this.machineEncryptions.size
+            });
+        } else {
+            console.log(`[Encryption.getMachineEncryption] Found encryption for ${machineId}`);
+        }
+
+        return encryption;
     }
 
     //

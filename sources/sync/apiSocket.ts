@@ -50,9 +50,14 @@ class ApiSocket {
 
     connect() {
         if (!this.config || this.socket) {
+            console.log('[ApiSocket.connect] Skipping connection', {
+                hasConfig: !!this.config,
+                hasSocket: !!this.socket
+            });
             return;
         }
 
+        console.log('[ApiSocket.connect] Initiating connection to:', this.config.endpoint);
         this.updateStatus('connecting');
 
         this.socket = io(this.config.endpoint, {
@@ -68,6 +73,7 @@ class ApiSocket {
             reconnectionAttempts: Infinity
         });
 
+        console.log('[ApiSocket.connect] Socket created, setting up event handlers');
         this.setupEventHandlers();
     }
 
@@ -131,21 +137,79 @@ class ApiSocket {
     /**
      * RPC call for machines - uses legacy/global encryption (for now)
      */
-    async machineRPC<R, A>(machineId: string, method: string, params: A): Promise<R> {   
+    async machineRPC<R, A>(machineId: string, method: string, params: A): Promise<R> {
+        console.log(`[ApiSocket.machineRPC] Starting RPC call:`, {
+            machineId,
+            method,
+            hasSocket: !!this.socket,
+            socketConnected: this.socket?.connected,
+            hasEncryption: !!this.encryption
+        });
+
+        if (!this.socket) {
+            console.error('[ApiSocket.machineRPC] Socket is not initialized');
+            throw new Error('Socket not initialized');
+        }
+
+        if (!this.socket.connected) {
+            console.error('[ApiSocket.machineRPC] Socket is not connected', {
+                currentStatus: this.currentStatus,
+                socketId: this.socket.id
+            });
+            throw new Error('Socket not connected');
+        }
+
         const machineEncryption = this.encryption!.getMachineEncryption(machineId);
         if (!machineEncryption) {
+            console.error(`[ApiSocket.machineRPC] Machine encryption not found:`, {
+                machineId,
+                hasEncryption: !!this.encryption,
+                availableMachines: this.encryption ? 'encrypted' : 'none'
+            });
             throw new Error(`Machine encryption not found for ${machineId}`);
         }
-        
-        const result = await this.socket!.emitWithAck('rpc-call', {
-            method: `${machineId}:${method}`,
-            params: await machineEncryption.encryptRaw(params)
-        });
-        
-        if (result.ok) {
-            return await machineEncryption.decryptRaw(result.result) as R;
+
+        try {
+            console.log(`[ApiSocket.machineRPC] Encrypting parameters...`);
+            const encryptedParams = await machineEncryption.encryptRaw(params);
+
+            console.log(`[ApiSocket.machineRPC] Emitting RPC call...`, {
+                method: `${machineId}:${method}`,
+                paramsEncrypted: true
+            });
+
+            const result = await this.socket!.emitWithAck('rpc-call', {
+                method: `${machineId}:${method}`,
+                params: encryptedParams
+            });
+
+            console.log(`[ApiSocket.machineRPC] Received response:`, {
+                ok: result.ok,
+                hasResult: !!result.result,
+                error: result.error || null
+            });
+
+            if (result.ok) {
+                const decrypted = await machineEncryption.decryptRaw(result.result) as R;
+                console.log(`[ApiSocket.machineRPC] Successfully decrypted response`);
+                return decrypted;
+            }
+
+            console.error(`[ApiSocket.machineRPC] RPC call failed:`, {
+                result,
+                method: `${machineId}:${method}`
+            });
+            throw new Error(result.error || 'RPC call failed');
+        } catch (error) {
+            console.error(`[ApiSocket.machineRPC] Exception during RPC:`, {
+                error,
+                errorMessage: error instanceof Error ? error.message : 'Unknown error',
+                errorStack: error instanceof Error ? error.stack : undefined,
+                machineId,
+                method
+            });
+            throw error;
         }
-        throw new Error('RPC call failed');
     }
 
     send(event: string, data: any) {
@@ -155,9 +219,28 @@ class ApiSocket {
 
     async emitWithAck<T = any>(event: string, data: any): Promise<T> {
         if (!this.socket) {
+            console.error('[ApiSocket.emitWithAck] Socket not initialized');
             throw new Error('Socket not connected');
         }
-        return await this.socket.emitWithAck(event, data);
+
+        if (!this.socket.connected) {
+            console.error('[ApiSocket.emitWithAck] Socket not connected', {
+                event,
+                currentStatus: this.currentStatus,
+                socketId: this.socket.id
+            });
+            throw new Error('Socket not connected');
+        }
+
+        console.log(`[ApiSocket.emitWithAck] Emitting event: ${event}`);
+        try {
+            const response = await this.socket.emitWithAck(event, data);
+            console.log(`[ApiSocket.emitWithAck] Received response for ${event}`);
+            return response;
+        } catch (error) {
+            console.error(`[ApiSocket.emitWithAck] Error emitting ${event}:`, error);
+            throw error;
+        }
     }
 
     //
@@ -207,6 +290,7 @@ class ApiSocket {
 
     private updateStatus(status: 'disconnected' | 'connecting' | 'connected' | 'error') {
         if (this.currentStatus !== status) {
+            console.log(`[ApiSocket] Status change: ${this.currentStatus} -> ${status}`);
             this.currentStatus = status;
             this.statusListeners.forEach(listener => listener(status));
         }
@@ -217,8 +301,8 @@ class ApiSocket {
 
         // Connection events
         this.socket.on('connect', () => {
-            // console.log('🔌 SyncSocket: Connected, recovered: ' + this.socket?.recovered);
-            // console.log('🔌 SyncSocket: Socket ID:', this.socket?.id);
+            console.log('🔌 [ApiSocket] Connected, recovered: ' + this.socket?.recovered);
+            console.log('🔌 [ApiSocket] Socket ID:', this.socket?.id);
             this.updateStatus('connected');
             if (!this.socket?.recovered) {
                 this.reconnectedListeners.forEach(listener => listener());
@@ -226,18 +310,22 @@ class ApiSocket {
         });
 
         this.socket.on('disconnect', (reason) => {
-            // console.log('🔌 SyncSocket: Disconnected', reason);
+            console.log('🔌 [ApiSocket] Disconnected:', reason);
             this.updateStatus('disconnected');
         });
 
         // Error events
         this.socket.on('connect_error', (error) => {
-            // console.error('🔌 SyncSocket: Connection error', error);
+            console.error('🔌 [ApiSocket] Connection error:', {
+                message: error.message,
+                type: (error as any).type,
+                data: (error as any).data
+            });
             this.updateStatus('error');
         });
 
         this.socket.on('error', (error) => {
-            // console.error('🔌 SyncSocket: Error', error);
+            console.error('🔌 [ApiSocket] Socket error:', error);
             this.updateStatus('error');
         });
 

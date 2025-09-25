@@ -147,10 +147,19 @@ export interface SpawnSessionOptions {
  * Spawn a new remote session on a specific machine
  */
 export async function machineSpawnNewSession(options: SpawnSessionOptions): Promise<SpawnSessionResult> {
-    
+
     const { machineId, directory, approvedNewDirectoryCreation = false, token, agent } = options;
 
+    console.log('[machineSpawnNewSession] Starting with options:', {
+        machineId,
+        directory,
+        agent,
+        approvedNewDirectoryCreation,
+        hasToken: !!token
+    });
+
     try {
+        console.log('[machineSpawnNewSession] Calling machineRPC...');
         const result = await apiSocket.machineRPC<SpawnSessionResult, {
             type: 'spawn-in-directory'
             directory: string
@@ -162,8 +171,18 @@ export async function machineSpawnNewSession(options: SpawnSessionOptions): Prom
             'spawn-happy-session',
             { type: 'spawn-in-directory', directory, approvedNewDirectoryCreation, token, agent }
         );
+
+        console.log('[machineSpawnNewSession] RPC completed successfully:', result);
         return result;
     } catch (error) {
+        console.error('[machineSpawnNewSession] RPC failed:', {
+            error,
+            errorMessage: error instanceof Error ? error.message : 'Unknown error',
+            errorStack: error instanceof Error ? error.stack : undefined,
+            machineId,
+            directory
+        });
+
         // Handle RPC errors
         return {
             type: 'error',

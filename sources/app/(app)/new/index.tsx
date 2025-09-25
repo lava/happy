@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, Platform, Pressable, useWindowDimensions } from 'react-native';
 import { Typography } from '@/constants/Typography';
-import { useAllMachines, storage, useSetting } from '@/sync/storage';
+import { useAllMachines, storage, useSetting, useSocketStatus } from '@/sync/storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useUnistyles } from 'react-native-unistyles';
@@ -83,6 +83,7 @@ const updateRecentMachinePaths = (
 export default function NewSessionScreen() {
     const { theme } = useUnistyles();
     const router = useRouter();
+    const socketStatus = useSocketStatus();
 
     const [input, setInput] = React.useState('');
     const [isSending, setIsSending] = React.useState(false);
@@ -239,6 +240,17 @@ export default function NewSessionScreen() {
 
     // Create
     const doCreate = React.useCallback(async () => {
+        // Check socket connection first
+        console.log('[SessionSpawn] Socket status:', socketStatus.status);
+        if (socketStatus.status !== 'connected') {
+            console.error('[SessionSpawn] Cannot spawn session - socket not connected. Status:', socketStatus.status);
+            Modal.alert(
+                t('common.error'),
+                `Cannot start session: Not connected to server (status: ${socketStatus.status}). Please check your internet connection and try again.`
+            );
+            return;
+        }
+
         if (!selectedMachineId) {
             Modal.alert(t('common.error'), t('newSession.noMachineSelected'));
             return;
@@ -248,12 +260,29 @@ export default function NewSessionScreen() {
             return;
         }
 
+        // Check if the selected machine exists in storage
+        const machine = storage.getState().machines[selectedMachineId];
+        if (!machine) {
+            console.error('[SessionSpawn] Machine not found in storage:', selectedMachineId);
+            console.error('[SessionSpawn] Available machines:', Object.keys(storage.getState().machines));
+            Modal.alert(t('common.error'), `Machine ${selectedMachineId} not found. Please refresh the machines list.`);
+            return;
+        }
+
+        console.log('[SessionSpawn] Starting session creation...', {
+            machineId: selectedMachineId,
+            directory: selectedPath,
+            agent: agentType,
+            timestamp: new Date().toISOString()
+        });
+
         // Save the machine-path combination to settings before sending
         const updatedPaths = updateRecentMachinePaths(recentMachinePaths, selectedMachineId, selectedPath);
         sync.applySettings({ recentMachinePaths: updatedPaths });
 
         setIsSending(true);
         try {
+            console.log('[SessionSpawn] Calling machineSpawnNewSession RPC...');
             const result = await machineSpawnNewSession({
                 machineId: selectedMachineId,
                 directory: selectedPath,
@@ -262,38 +291,80 @@ export default function NewSessionScreen() {
                 agent: agentType
             });
 
+            console.log('[SessionSpawn] RPC Response:', result);
+
             // Use sessionId to check for success for backwards compatibility
             if ('sessionId' in result && result.sessionId) {
+                console.log('[SessionSpawn] Session created successfully:', result.sessionId);
+
                 // Load sessions
+                console.log('[SessionSpawn] Refreshing sessions list...');
                 await sync.refreshSessions();
+
                 // Send message
-                await sync.sendMessage(result.sessionId, input);
+                if (input) {
+                    console.log('[SessionSpawn] Sending initial message...');
+                    await sync.sendMessage(result.sessionId, input);
+                }
+
                 // Navigate to session
+                console.log('[SessionSpawn] Navigating to session:', result.sessionId);
                 router.replace(`/session/${result.sessionId}`, {
                     dangerouslySingular() {
                         return 'session'
                     },
                 });
+            } else if (result.type === 'error') {
+                console.error('[SessionSpawn] Error response from daemon:', result.errorMessage);
+                throw new Error(result.errorMessage || 'Session spawning failed - unknown error');
+            } else if (result.type === 'requestToApproveDirectoryCreation') {
+                console.warn('[SessionSpawn] Directory approval needed:', result.directory);
+                throw new Error(`Directory creation approval needed for: ${result.directory}`);
             } else {
+                console.error('[SessionSpawn] Unexpected response type:', result);
                 throw new Error('Session spawning failed - no session ID returned.');
             }
         } catch (error) {
-            console.error('Failed to start session', error);
+            console.error('[SessionSpawn] Failed to start session:', {
+                error,
+                errorMessage: error instanceof Error ? error.message : 'Unknown error',
+                errorStack: error instanceof Error ? error.stack : undefined,
+                machineId: selectedMachineId,
+                directory: selectedPath
+            });
 
             let errorMessage = 'Failed to start session. Make sure the daemon is running on the target machine.';
+            let debugInfo = '';
+
             if (error instanceof Error) {
                 if (error.message.includes('timeout')) {
                     errorMessage = 'Session startup timed out. The machine may be slow or the daemon may not be responding.';
+                    debugInfo = 'Check: Is the daemon running? Use `happy daemon status` on the target machine.';
                 } else if (error.message.includes('Socket not connected')) {
                     errorMessage = 'Not connected to server. Check your internet connection.';
+                    debugInfo = 'The app is not connected to the Happy server. Please check your network connection.';
+                } else if (error.message.includes('encryption not found')) {
+                    errorMessage = `Machine encryption not configured.`;
+                    debugInfo = `Machine ${selectedMachineId} is not properly initialized. Try refreshing the machines list or re-pairing the machine.`;
+                } else if (error.message.includes('RPC call failed')) {
+                    errorMessage = 'Failed to communicate with the daemon.';
+                    debugInfo = 'The daemon may not be running or may be unreachable. Run `happy daemon start` on the target machine.';
+                } else if (error.message) {
+                    // Use the actual error message if it's informative
+                    errorMessage = `Failed to start session: ${error.message}`;
+                    debugInfo = 'Check the console logs for more details.';
                 }
             }
 
-            Modal.alert(t('common.error'), errorMessage);
+            // Create detailed error message
+            const fullMessage = debugInfo ? `${errorMessage}\n\n${debugInfo}` : errorMessage;
+            console.error('[SessionSpawn] Showing error to user:', fullMessage);
+
+            Modal.alert(t('common.error'), fullMessage);
         } finally {
             setIsSending(false);
         }
-    }, [agentType, selectedMachineId, selectedPath, input, recentMachinePaths]);
+    }, [agentType, selectedMachineId, selectedPath, input, recentMachinePaths, socketStatus]);
 
     return (
         <KeyboardAvoidingView
